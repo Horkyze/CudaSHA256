@@ -4,13 +4,15 @@
 #include "sha256.cuh"
 
 
-__global__ void sha256_cuda(JOB ** jobs) {
+__global__ void sha256_cuda(JOB ** jobs, int n) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	// perform sha256 calculation here
-	SHA256_CTX ctx;
-	sha256_init(&ctx);
-	sha256_update(&ctx, jobs[i]->data, jobs[i]->size);
-	sha256_final(&ctx, jobs[i]->digest);
+	if (i < n){
+		SHA256_CTX ctx;
+		sha256_init(&ctx);
+		sha256_update(&ctx, jobs[i]->data, jobs[i]->size);
+		sha256_final(&ctx, jobs[i]->digest);
+	}
 }
 
 void pre_sha256() {
@@ -21,7 +23,9 @@ void pre_sha256() {
 
 void runJobs(JOB ** jobs, int n)
 {
-	sha256_cuda <<< 1, n >>> (jobs);
+	int blockSize = 1024;
+	int numBlocks = (n + blockSize - 1) / blockSize;
+	sha256_cuda <<< numBlocks, blockSize >>> (jobs, n);
 }
 
 void print_jobs(JOB ** jobs, int n) {
@@ -40,7 +44,7 @@ JOB * JOB_init() {
 	//j = (JOB *)malloc(sizeof(JOB));
 	checkCudaErrors(cudaMallocManaged(&j, sizeof(JOB)));
 	checkCudaErrors(cudaMallocManaged(&(j->data), 2));
-	cudaMemset(j->data, 0xff, 2);
+	cudaMemset(j->data, 0x00, 2);
 	j->size = 2;
 	for (int i = 0; i < 64; i++)
 	{
@@ -54,7 +58,7 @@ int main()
 	// parse input
 
 	// number of jobs
-	int n = 3;
+	int n = 1<<16; // 1M
 
 
 	// create JOB array
@@ -66,14 +70,14 @@ int main()
 	{
 		jobs[i] = JOB_init();
 	}
-	print_jobs(jobs, n);
+	//print_jobs(jobs, n);
 
 	pre_sha256();
 	runJobs(jobs, n);
 
 	cudaDeviceSynchronize();
 
-	print_jobs(jobs, n);
+	//print_jobs(jobs, n);
 
 	cudaDeviceReset();
     return 0;
