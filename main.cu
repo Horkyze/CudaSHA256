@@ -22,25 +22,14 @@ void pre_sha256() {
 }
 
 
-void runJobs(JOB ** jobs, int n)
-{
+void runJobs(JOB ** jobs, int n){
 	int blockSize = 4;
 	int numBlocks = (n + blockSize - 1) / blockSize;
 	sha256_cuda <<< numBlocks, blockSize >>> (jobs, n);
 }
 
-void print_jobs(JOB ** jobs, int n) {
-	printf("@ %p jobs  \n", jobs);
-	for (int i = 0; i < n; i++)
-	{
-		printf("@ %p JOB[%i] \n", jobs[i], i);
-		printf("\t @ 0x%p data = %x \n", jobs[i]->data, (jobs[i]->data == 0)? 0 : jobs[i]->data[0]);
-		printf("\t @ 0x%p size = %llu \n", &(jobs[i]->size), jobs[i]->size);
-		printf("\t @ 0x%p digest = %s \n------\n", jobs[i]->digest, print_sha(jobs[i]->digest));
-	}
-}
 
-JOB * JOB_init(BYTE * data, long size) {
+JOB * JOB_init(BYTE * data, long size, char * fname) {
 	JOB * j;
 	checkCudaErrors(cudaMallocManaged(&j, sizeof(JOB)));	//j = (JOB *)malloc(sizeof(JOB));
 	checkCudaErrors(cudaMallocManaged(&(j->data), size));
@@ -50,15 +39,12 @@ JOB * JOB_init(BYTE * data, long size) {
 	{
 		j->digest[i] = 0xff;
 	}
+	strcpy(j->fname, fname);
 	return j;
 }
 
-void print_usage(){
-	printf("/.CuadaSHA256 <file>");
-}
 
-
-BYTE * get_file_data(char * fname, unsigned long * size){
+BYTE * get_file_data(char * fname, unsigned long * size) {
 	FILE * f = 0;
 	BYTE * buffer = 0;
 	unsigned long fsize = 0;
@@ -83,12 +69,14 @@ BYTE * get_file_data(char * fname, unsigned long * size){
 	fread(buffer, fsize, 1, f);
 	fclose(f);
 	*size = fsize;
-	printf("fsize: %lu\n", fsize);
 	return buffer;
 }
 
-int main(int argc, char **argv)
-{
+void print_usage(){
+	printf("/.CudaSHA256 <file> ...\n");
+}
+
+int main(int argc, char **argv) {
 	int i;
 	unsigned long temp;
 	char * a_file;
@@ -96,34 +84,36 @@ int main(int argc, char **argv)
 	char option, index;
 
 	// parse input
-    while ((option = getopt(argc, argv,"f:")) != -1)
-        switch (option) {
-             case 'f' :
-            	 a_file = optarg;
-                 break;
-             default:
-            	 break;
-        }
+	while ((option = getopt(argc, argv,"hf:")) != -1)
+		switch (option) {
+			case 'h' :
+				print_usage();
+				break;
+			case 'f' :
+				a_file = optarg;
+				break;
+			default:
+				break;
+		}
 
-    // get number of arguments = files = jobs
-    int n = argc - optind;
+	// get number of arguments = files = jobs
+	int n = argc - optind;
+	if (n > 0){
+		JOB ** jobs;
+		checkCudaErrors(cudaMallocManaged(&jobs, n * sizeof(JOB *)));
 
-    JOB ** jobs;
-    checkCudaErrors(cudaMallocManaged(&jobs, n * sizeof(JOB *)));
+		// iterate over file list - non optional arguments
+		for (i = 0, index = optind; index < argc; index++, i++){
+			buff = get_file_data(argv[index], &temp);
+			jobs[i] = JOB_init(buff, temp, argv[index]);
+		}
 
-    // iterate over file list
-    for (i = 0, index = optind; index < argc; index++, i++){
-        printf ("Non-option argument '%s'\n", argv[index]);
-        buff = get_file_data(argv[index], &temp);
-        jobs[i] = JOB_init(buff, temp);
-    }
-
-    print_jobs(jobs, n);
-	pre_sha256();
-	runJobs(jobs, n);
-	cudaDeviceSynchronize();
-	print_jobs(jobs, n);
-
+		//print_jobs(jobs, n);
+		pre_sha256();
+		runJobs(jobs, n);
+		cudaDeviceSynchronize();
+		print_jobs(jobs, n);
+	}
 	cudaDeviceReset();
-    return 0;
+	return 0;
 }

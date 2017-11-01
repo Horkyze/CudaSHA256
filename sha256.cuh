@@ -31,6 +31,7 @@ typedef struct JOB {
 	BYTE * data;
 	unsigned long long size;
 	BYTE digest[64];
+	char fname[128];
 }JOB;
 
 
@@ -61,9 +62,7 @@ __device__ void sha256_update(SHA256_CTX *ctx, const BYTE data[], size_t len);
 __device__ void sha256_final(SHA256_CTX *ctx, BYTE hash[]);
 
 
-#endif   // SHA256_H
-
-char * print_sha(BYTE * buff) {
+char * hash_to_string(BYTE * buff) {
 	char * string = (char *)malloc(70);
 	int k, i;
 	for (i = 0, k = 0; i < 32; i++, k+= 2)
@@ -75,6 +74,21 @@ char * print_sha(BYTE * buff) {
 	return string;
 }
 
+void print_job(JOB * j){
+	printf("%s  %s\n", hash_to_string(j->digest), j->fname);
+}
+
+void print_jobs(JOB ** jobs, int n) {
+	for (int i = 0; i < n; i++)
+	{
+        print_job(jobs[i]);
+		// printf("@ %p JOB[%i] \n", jobs[i], i);
+		// printf("\t @ 0x%p data = %x \n", jobs[i]->data, (jobs[i]->data == 0)? 0 : jobs[i]->data[0]);
+		// printf("\t @ 0x%p size = %llu \n", &(jobs[i]->size), jobs[i]->size);
+		// printf("\t @ 0x%p fname = %s \n", &(jobs[i]->fname), jobs[i]->fname);
+		// printf("\t @ 0x%p digest = %s \n------\n", jobs[i]->digest, hash_to_string(jobs[i]->digest));
+	}
+}
 
 __device__ void sha256_transform(SHA256_CTX *ctx, const BYTE data[])
 {
@@ -195,3 +209,5 @@ void sha256_final(SHA256_CTX *ctx, BYTE hash[])
 		hash[i + 28] = (ctx->state[7] >> (24 - i * 8)) & 0x000000ff;
 	}
 }
+
+#endif   // SHA256_H
