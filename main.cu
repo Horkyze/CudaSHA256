@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "sha256.cuh"
 
 
@@ -23,7 +24,7 @@ void pre_sha256() {
 
 void runJobs(JOB ** jobs, int n)
 {
-	int blockSize = 1024;
+	int blockSize = 4;
 	int numBlocks = (n + blockSize - 1) / blockSize;
 	sha256_cuda <<< numBlocks, blockSize >>> (jobs, n);
 }
@@ -33,19 +34,18 @@ void print_jobs(JOB ** jobs, int n) {
 	for (int i = 0; i < n; i++)
 	{
 		printf("@ %p JOB[%i] \n", jobs[i], i);
-		printf("\t @ 0x%p data = %x \n", jobs[i]->data, jobs[i]->data[0]);
+		printf("\t @ 0x%p data = %x \n", jobs[i]->data, (jobs[i]->data == 0)? 0 : jobs[i]->data[0]);
 		printf("\t @ 0x%p size = %llu \n", &(jobs[i]->size), jobs[i]->size);
 		printf("\t @ 0x%p digest = %s \n------\n", jobs[i]->digest, print_sha(jobs[i]->digest));
 	}
 }
 
-JOB * JOB_init() {
+JOB * JOB_init(BYTE * data, long size) {
 	JOB * j;
-	//j = (JOB *)malloc(sizeof(JOB));
-	checkCudaErrors(cudaMallocManaged(&j, sizeof(JOB)));
-	checkCudaErrors(cudaMallocManaged(&(j->data), 2));
-	cudaMemset(j->data, 0x00, 2);
-	j->size = 2;
+	checkCudaErrors(cudaMallocManaged(&j, sizeof(JOB)));	//j = (JOB *)malloc(sizeof(JOB));
+	checkCudaErrors(cudaMallocManaged(&(j->data), size));
+	j->data = data;
+	j->size = size;
 	for (int i = 0; i < 64; i++)
 	{
 		j->digest[i] = 0xff;
@@ -53,31 +53,76 @@ JOB * JOB_init() {
 	return j;
 }
 
-int main()
-{
-	// parse input
-
-	// number of jobs
-	int n = 1<<16; // 1M
+void print_usage(){
+	printf("/.CuadaSHA256 <file>");
+}
 
 
-	// create JOB array
-	JOB ** jobs;
-	checkCudaErrors(cudaMallocManaged(&jobs, n * sizeof(JOB *)));
-	//jobs = (JOB **) malloc(n * sizeof(JOB *));
-	int i = 0;
-	for (i = 0; i < n; i++)
-	{
-		jobs[i] = JOB_init();
+BYTE * get_file_data(char * fname, unsigned long * size){
+	FILE * f = 0;
+	BYTE * buffer = 0;
+	unsigned long fsize = 0;
+
+	f = fopen(fname, "rb");
+	if (!f){
+		fprintf(stderr, "Unable to open %s\n", fname);
+		return 0;
 	}
-	//print_jobs(jobs, n);
+	fflush(f);
 
+	if (fseek(f, 0, SEEK_END)){
+		fprintf(stderr, "Unable to fseek %s\n", fname);
+		return 0;
+	}
+	fflush(f);
+	fsize = ftell(f);
+	rewind(f);
+
+	//buffer = (char *)malloc((fsize+1)*sizeof(char));
+	checkCudaErrors(cudaMallocManaged(&buffer, (fsize+1)*sizeof(char)));
+	fread(buffer, fsize, 1, f);
+	fclose(f);
+	*size = fsize;
+	printf("fsize: %lu\n", fsize);
+	return buffer;
+}
+
+int main(int argc, char **argv)
+{
+	int i;
+	unsigned long temp;
+	char * a_file;
+	BYTE * buff;
+	char option, index;
+
+	// parse input
+    while ((option = getopt(argc, argv,"f:")) != -1)
+        switch (option) {
+             case 'f' :
+            	 a_file = optarg;
+                 break;
+             default:
+            	 break;
+        }
+
+    // get number of arguments = files = jobs
+    int n = argc - optind;
+
+    JOB ** jobs;
+    checkCudaErrors(cudaMallocManaged(&jobs, n * sizeof(JOB *)));
+
+    // iterate over file list
+    for (i = 0, index = optind; index < argc; index++, i++){
+        printf ("Non-option argument '%s'\n", argv[index]);
+        buff = get_file_data(argv[index], &temp);
+        jobs[i] = JOB_init(buff, temp);
+    }
+
+    print_jobs(jobs, n);
 	pre_sha256();
 	runJobs(jobs, n);
-
 	cudaDeviceSynchronize();
-
-	//print_jobs(jobs, n);
+	print_jobs(jobs, n);
 
 	cudaDeviceReset();
     return 0;
