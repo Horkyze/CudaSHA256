@@ -1,3 +1,8 @@
+// cd /home/hork/cuda-workspace/CudaSHA256/Debug/files
+// time ~/Dropbox/FIIT/APS/Projekt/CpuSHA256/a.out -f ../file-list
+// time ../CudaSHA256 -f ../file-list
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5,7 +10,47 @@
 #include <cuda.h>
 #include "sha256.cuh"
 #include <dirent.h>
+#include <ctype.h>
 
+char * trim(char *str){
+    size_t len = 0;
+    char *frontp = str;
+    char *endp = NULL;
+
+    if( str == NULL ) { return NULL; }
+    if( str[0] == '\0' ) { return str; }
+
+    len = strlen(str);
+    endp = str + len;
+
+    /* Move the front and back pointers to address the first non-whitespace
+     * characters from each end.
+     */
+    while( isspace((unsigned char) *frontp) ) { ++frontp; }
+    if( endp != frontp )
+    {
+        while( isspace((unsigned char) *(--endp)) && endp != frontp ) {}
+    }
+
+    if( str + len - 1 != endp )
+            *(endp + 1) = '\0';
+    else if( frontp != str &&  endp == frontp )
+            *str = '\0';
+
+    /* Shift the string so that it starts at str so that if it's dynamically
+     * allocated, we can still free it on the returned pointer.  Note the reuse
+     * of endp to mean the front of the string buffer now.
+     */
+    endp = str;
+    if( frontp != str )
+    {
+            while( *frontp ) { *endp++ = *frontp++; }
+            *endp = '\0';
+    }
+
+
+    return str;
+}
 
 __global__ void sha256_cuda(JOB ** jobs, int n) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -53,7 +98,7 @@ BYTE * get_file_data(char * fname, unsigned long * size) {
 
 	f = fopen(fname, "rb");
 	if (!f){
-		fprintf(stderr, "Unable to open %s\n", fname);
+		fprintf(stderr, "get_file_data Unable to open '%s'\n", fname);
 		return 0;
 	}
 	fflush(f);
@@ -75,16 +120,26 @@ BYTE * get_file_data(char * fname, unsigned long * size) {
 }
 
 void print_usage(){
-	printf("/.CudaSHA256 <file> ...\n");
+	printf("Usage: CudaSHA256 [OPTION] [FILE]...\n");
+	printf("Calculate sha256 hash of given FILEs\n\n");
+	printf("OPTIONS:\n");
+	printf("\t-f FILE1 \tRead a list of files (separeted by \\n) from FILE1, output hash for each file\n");
+	printf("\t-h       \tPrint this help\n");
+	printf("\nIf no OPTIONS are supplied, then program reads the content of FILEs and outputs hash for each FILEs \n");
+	printf("\nOutput format:\n");
+	printf("Hash following by two spaces following by file name (same as sha256sum).\n");
+	printf("\nNotes:\n");
+	printf("Calculations are performed on GPU, each seperate file is hashed in its own thread\n");
 }
 
 int main(int argc, char **argv) {
 	int i = 0, n = 0;
 	size_t len;
 	unsigned long temp;
-	char * a_file = 0, line = 0;
+	char * a_file = 0, * line = 0;
 	BYTE * buff;
 	char option, index;
+	ssize_t read;
 	JOB ** jobs;
 
 	// parse input
@@ -102,38 +157,29 @@ int main(int argc, char **argv) {
 
 
 	if (a_file) {
-
-		checkCudaErrors(cudaMallocManaged(&jobs, 1001 * sizeof(JOB *)));
-
-		DIR * d;
-		struct dirent * dir;
-		d = opendir(a_file);
-		if (d) {
-			while ((dir = readdir(d)) != NULL){
-				//printf("%s\n", dir->d_name);
-				if (dir->d_name[0] != '.') {
-					buff = get_file_data(dir->d_name, &temp);
-					jobs[n++] = JOB_init(buff, temp, dir->d_name);
-				}
-
-			}
-		  closedir(d);
+		FILE * f = 0;
+		f = fopen(a_file, "r");
+		if (!f){
+			fprintf(stderr, "Unable to open %s\n", a_file);
+			return 0;
 		}
 
+		for (n = 0; getline(&line, &len, f) != -1; n++){}
+		checkCudaErrors(cudaMallocManaged(&jobs, n * sizeof(JOB *)));
+		fseek(f, 0, SEEK_SET);
+
+		n = 0;
+		read = getline(&line, &len, f);
+		while (read != -1) {
+			//printf("%s\n", line);
+			read = getline(&line, &len, f);
+			line = trim(line);
+			buff = get_file_data(line, &temp);
+			jobs[n++] = JOB_init(buff, temp, line);
+		}
 
 		pre_sha256();
 		runJobs(jobs, n);
-
-		// FILE * f = 0;
-		// f = fopen(fname, "rb");
-		// if (!f){
-		// 	fprintf(stderr, "Unable to open %s\n", fname);
-		// 	return 0;
-		// }
-		// while ((read = getline(&line, &len, f)) != -1) {
-		// 	printf("Retrieved line of length %zu :\n", read);
-		// 	printf("%s", line);
-		// }
 
 	} else {
 		// get number of arguments = files = jobs
@@ -148,7 +194,6 @@ int main(int argc, char **argv) {
 				jobs[i] = JOB_init(buff, temp, argv[index]);
 			}
 
-			//print_jobs(jobs, n);
 			pre_sha256();
 			runJobs(jobs, n);
 		}
