@@ -25,7 +25,7 @@
 }
 /**************************** DATA TYPES ****************************/
 typedef unsigned char BYTE;             // 8-bit byte
-typedef unsigned int  WORD;             // 32-bit word, change to "long" for 16-bit machines
+typedef uint32_t  WORD;             // 32-bit word, change to "long" for 16-bit machines
 
 typedef struct JOB {
 	BYTE * data;
@@ -90,12 +90,48 @@ void print_jobs(JOB ** jobs, int n) {
 	}
 }
 
+__device__ void mycpy12(uint32_t *d, const uint32_t *s) {
+#pragma unroll 3
+    for (int k=0; k < 3; k++) d[k] = s[k];
+}
+
+__device__ void mycpy16(uint32_t *d, const uint32_t *s) {
+#pragma unroll 4
+    for (int k=0; k < 4; k++) d[k] = s[k];
+}
+
+__device__ void mycpy32(uint32_t *d, const uint32_t *s) {
+#pragma unroll 8
+    for (int k=0; k < 8; k++) d[k] = s[k];
+}
+
+__device__ void mycpy44(uint32_t *d, const uint32_t *s) {
+#pragma unroll 11
+    for (int k=0; k < 11; k++) d[k] = s[k];
+}
+
+__device__ void mycpy48(uint32_t *d, const uint32_t *s) {
+#pragma unroll 12
+    for (int k=0; k < 12; k++) d[k] = s[k];
+}
+
+__device__ void mycpy64(uint32_t *d, const uint32_t *s) {
+#pragma unroll 16
+    for (int k=0; k < 16; k++) d[k] = s[k];
+}
+
 __device__ void sha256_transform(SHA256_CTX *ctx, const BYTE data[])
 {
 	WORD a, b, c, d, e, f, g, h, i, j, t1, t2, m[64];
+    WORD S[8];
 
+    //mycpy32(S, ctx->state);
+
+    #pragma unroll 16
 	for (i = 0, j = 0; i < 16; ++i, j += 4)
 		m[i] = (data[j] << 24) | (data[j + 1] << 16) | (data[j + 2] << 8) | (data[j + 3]);
+
+    #pragma unroll 64
 	for (; i < 64; ++i)
 		m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
 
@@ -108,6 +144,7 @@ __device__ void sha256_transform(SHA256_CTX *ctx, const BYTE data[])
 	g = ctx->state[6];
 	h = ctx->state[7];
 
+    #pragma unroll 64
 	for (i = 0; i < 64; ++i) {
 		t1 = h + EP1(e) + CH(e, f, g) + dev_k[i] + m[i];
 		t2 = EP0(a) + MAJ(a, b, c);
@@ -145,8 +182,7 @@ __device__ void sha256_init(SHA256_CTX *ctx)
 	ctx->state[7] = 0x5be0cd19;
 }
 
-__device__
-void sha256_update(SHA256_CTX *ctx, const BYTE data[], size_t len)
+__device__ void sha256_update(SHA256_CTX *ctx, const BYTE data[], size_t len)
 {
 	WORD i;
 
@@ -163,8 +199,7 @@ void sha256_update(SHA256_CTX *ctx, const BYTE data[], size_t len)
 	}
 }
 
-__device__
-void sha256_final(SHA256_CTX *ctx, BYTE hash[])
+__device__ void sha256_final(SHA256_CTX *ctx, BYTE hash[])
 {
 	WORD i;
 

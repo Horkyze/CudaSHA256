@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <cuda.h>
 #include "sha256.cuh"
+#include <dirent.h>
 
 
 __global__ void sha256_cuda(JOB ** jobs, int n) {
@@ -77,11 +79,13 @@ void print_usage(){
 }
 
 int main(int argc, char **argv) {
-	int i;
+	int i = 0, n = 0;
+	size_t len;
 	unsigned long temp;
-	char * a_file;
+	char * a_file = 0, line = 0;
 	BYTE * buff;
 	char option, index;
+	JOB ** jobs;
 
 	// parse input
 	while ((option = getopt(argc, argv,"hf:")) != -1)
@@ -96,24 +100,62 @@ int main(int argc, char **argv) {
 				break;
 		}
 
-	// get number of arguments = files = jobs
-	int n = argc - optind;
-	if (n > 0){
-		JOB ** jobs;
-		checkCudaErrors(cudaMallocManaged(&jobs, n * sizeof(JOB *)));
 
-		// iterate over file list - non optional arguments
-		for (i = 0, index = optind; index < argc; index++, i++){
-			buff = get_file_data(argv[index], &temp);
-			jobs[i] = JOB_init(buff, temp, argv[index]);
+	if (a_file) {
+
+		checkCudaErrors(cudaMallocManaged(&jobs, 1001 * sizeof(JOB *)));
+
+		DIR * d;
+		struct dirent * dir;
+		d = opendir(a_file);
+		if (d) {
+			while ((dir = readdir(d)) != NULL){
+				//printf("%s\n", dir->d_name);
+				if (dir->d_name[0] != '.') {
+					buff = get_file_data(dir->d_name, &temp);
+					jobs[n++] = JOB_init(buff, temp, dir->d_name);
+				}
+
+			}
+		  closedir(d);
 		}
 
-		//print_jobs(jobs, n);
+
 		pre_sha256();
 		runJobs(jobs, n);
-		cudaDeviceSynchronize();
-		print_jobs(jobs, n);
+
+		// FILE * f = 0;
+		// f = fopen(fname, "rb");
+		// if (!f){
+		// 	fprintf(stderr, "Unable to open %s\n", fname);
+		// 	return 0;
+		// }
+		// while ((read = getline(&line, &len, f)) != -1) {
+		// 	printf("Retrieved line of length %zu :\n", read);
+		// 	printf("%s", line);
+		// }
+
+	} else {
+		// get number of arguments = files = jobs
+		n = argc - optind;
+		if (n > 0){
+
+			checkCudaErrors(cudaMallocManaged(&jobs, n * sizeof(JOB *)));
+
+			// iterate over file list - non optional arguments
+			for (i = 0, index = optind; index < argc; index++, i++){
+				buff = get_file_data(argv[index], &temp);
+				jobs[i] = JOB_init(buff, temp, argv[index]);
+			}
+
+			//print_jobs(jobs, n);
+			pre_sha256();
+			runJobs(jobs, n);
+		}
 	}
+
+	cudaDeviceSynchronize();
+	print_jobs(jobs, n);
 	cudaDeviceReset();
 	return 0;
 }
